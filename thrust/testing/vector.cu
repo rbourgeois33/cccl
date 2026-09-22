@@ -1031,3 +1031,37 @@ void TestVectorNoInitResize()
   // thrust::device_vector<IntWithInit>(5).resize(10, thrust::no_init);
 }
 DECLARE_UNITTEST(TestVectorNoInitResize);
+
+// emplace_back
+template <class Vector>
+void TestVectorEmplaceBack()
+{
+  using T = typename Vector::value_type;
+
+  Vector v;
+
+  v.emplace_back((T) 0);
+
+  REQUIRE(v.size() == 1);
+  REQUIRE(v[0] == 0);
+}
+DECLARE_VECTOR_UNITTEST(TestVectorEmplaceBack);
+
+struct CannotBeCopiedNorMoved
+{
+  CannotBeCopiedNorMoved(const CannotBeCopiedNorMoved& other)            = delete;
+  CannotBeCopiedNorMoved& operator=(const CannotBeCopiedNorMoved& other) = delete;
+
+  CannotBeCopiedNorMoved(CannotBeCopiedNorMoved&& other)            = delete;
+  CannotBeCopiedNorMoved& operator=(CannotBeCopiedNorMoved&& other) = delete;
+};
+
+void TestVectorEmplaceBackDoesNotCopyOrMove()
+{
+  using T = CannotBeCopiedNorMoved;
+
+  thrust::host_vector<T> v;
+
+  v.emplace_back((T) {});
+}
+DECLARE_UNITTEST(TestVectorEmplaceBackDoesNotCopyOrMove);
