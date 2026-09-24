@@ -186,9 +186,9 @@ contiguous_storage<T, Alloc>::uninitialized_fill_n(iterator first, size_type n, 
 
 template <typename T, typename Alloc>
 template <typename... Args>
-_CCCL_HOST_DEVICE void contiguous_storage<T, Alloc>::emplace_construct(iterator location, Args&&... args)
+_CCCL_HOST_DEVICE void contiguous_storage<T, Alloc>::emplace_construct_one(iterator location, Args&&... args)
 {
-  emplace_construct_one(m_allocator, location.base(), ::cuda::std::forward<Args>(args)...);
+  emplace_construct(m_allocator, location.base(), ::cuda::std::forward<Args>(args)...);
 } // end contiguous_storage::emplace_construct_one
 
 template <typename T, typename Alloc>

@@ -85,7 +85,6 @@ void TestVectorManipulation(size_t n)
 
   // emplace_back
   Vector vec3;
-  vec.reserve(10); // TODO remove by allowing realloc
   for (size_t i = 0; i < 10; ++i)
   {
     REQUIRE(vec3.size() == i);

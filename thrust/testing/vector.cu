@@ -1033,21 +1033,6 @@ void TestVectorNoInitResize()
 }
 DECLARE_UNITTEST(TestVectorNoInitResize);
 
-// emplace_back
-template <class Vector>
-void TestVectorEmplaceBack()
-{
-  using T = typename Vector::value_type;
-
-  Vector v;
-
-  // v.emplace_back((T) 0);
-
-  // REQUIRE(v.size() == 1);
-  // REQUIRE(v[0] == 0);
-}
-DECLARE_VECTOR_UNITTEST(TestVectorEmplaceBack);
-
 struct RemembersCopy
 {
   _CCCL_HOST_DEVICE RemembersCopy()
@@ -1095,11 +1080,9 @@ void TestVectorEmplaceBackDoesNotCopy()
   using T = RemembersCopy;
 
   thrust::host_vector<T> v_h;
-  v_h.reserve(1); // TODO remove by allowing realloc
   v_h.emplace_back(42);
 
   thrust::device_vector<T> v_d;
-  v_d.reserve(1); // TODO remove by allowing realloc
   v_d.emplace_back(42);
 
   REQUIRE(v_h[0].copied() == false);
@@ -1155,16 +1138,14 @@ struct is_constructed_on_device
   }
 };
 
-void TestVectorEmplaceBackConstructInTheRightLocation()
+void TestVectorEmplaceBackConstructsInTheRightLocation()
 {
   using T = RemembersConstructionLocation;
 
   thrust::host_vector<T> v_h;
-  v_h.reserve(1); // TODO remove by allowing realloc
   v_h.emplace_back(42);
 
   thrust::device_vector<T> v_d;
-  v_d.reserve(1); // TODO remove by allowing realloc
   v_d.emplace_back(42);
 
   REQUIRE(v_h[0].constructed_on_host() == true);
@@ -1172,3 +1153,32 @@ void TestVectorEmplaceBackConstructInTheRightLocation()
   int n_constructed_on_device = thrust::count_if(thrust::device, first, first + v_d.size(), is_constructed_on_device{});
   REQUIRE(n_constructed_on_device == 1);
 }
+DECLARE_UNITTEST(TestVectorEmplaceBackConstructsInTheRightLocation);
+
+struct ThrowsIfBuiltWithInteger
+{
+  _CCCL_HOST_DEVICE ThrowsIfBuiltWithInteger()
+  {
+    n_ = 0;
+  }
+
+  _CCCL_HOST_DEVICE explicit ThrowsIfBuiltWithInteger(int n)
+  {
+    n_ = n;
+    NV_IF_TARGET(NV_IS_HOST, (throw std::runtime_error("can't be built like this!");));
+  }
+
+  int n_;
+};
+
+void TestVectorEmplaceBackThrowsIfCtorThrows()
+{
+  using T = ThrowsIfBuiltWithInteger;
+
+  thrust::host_vector<T> v_h;
+  v_h.emplace_back();
+  v_h.emplace_back();
+  REQUIRE_THROWS_AS(v_h.emplace_back(42), std::runtime_error);
+}
+
+DECLARE_UNITTEST(TestVectorEmplaceBackThrowsIfCtorThrows);

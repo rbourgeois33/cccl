@@ -42,8 +42,8 @@ struct emplace_via_allocator
   {
     // apply allows to have any numer of args as input to function
     ::cuda::std::apply(
-      [&](auto&... x) {
-        new (static_cast<void*>(&p)) T(x...);
+      [&](auto&... xs) {
+        new (static_cast<void*>(&p)) T(xs...);
       },
       args_as_a_tuple);
   }
