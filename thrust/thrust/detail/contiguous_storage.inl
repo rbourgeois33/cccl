@@ -5,6 +5,8 @@
 
 #include <thrust/detail/config.h>
 
+#include "cuda/std/__utility/forward.h"
+
 #if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
 #  pragma GCC system_header
 #elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
@@ -15,6 +17,7 @@
 
 #include <thrust/detail/allocator/copy_construct_range.h>
 #include <thrust/detail/allocator/destroy_range.h>
+#include <thrust/detail/allocator/emplace_construct.h>
 #include <thrust/detail/allocator/fill_construct_range.h>
 #include <thrust/detail/allocator/value_initialize_range.h>
 #include <thrust/detail/contiguous_storage.h>
@@ -180,6 +183,13 @@ contiguous_storage<T, Alloc>::uninitialized_fill_n(iterator first, size_type n, 
 {
   fill_construct_range(m_allocator, first.base(), n, x);
 } // end contiguous_storage::uninitialized_fill()
+
+template <typename T, typename Alloc>
+template <typename... Args>
+_CCCL_HOST_DEVICE void contiguous_storage<T, Alloc>::emplace_construct(iterator location, Args&&... args)
+{
+  emplace_construct_one(m_allocator, location.base(), ::cuda::std::forward<Args>(args)...);
+} // end contiguous_storage::emplace_construct_one
 
 template <typename T, typename Alloc>
 template <typename System, typename InputIterator>

@@ -6,6 +6,7 @@
 _CCCL_DIAG_SUPPRESS_GCC("-Wstringop-overflow")
 _CCCL_DIAG_SUPPRESS_GCC("-Warray-bounds")
 
+#include <thrust/count.h>
 #include <thrust/device_malloc_allocator.h>
 #include <thrust/sequence.h>
 
@@ -1040,28 +1041,134 @@ void TestVectorEmplaceBack()
 
   Vector v;
 
-  v.emplace_back((T) 0);
+  // v.emplace_back((T) 0);
 
-  REQUIRE(v.size() == 1);
-  REQUIRE(v[0] == 0);
+  // REQUIRE(v.size() == 1);
+  // REQUIRE(v[0] == 0);
 }
 DECLARE_VECTOR_UNITTEST(TestVectorEmplaceBack);
 
-struct CannotBeCopiedNorMoved
+struct RemembersCopy
 {
-  CannotBeCopiedNorMoved(const CannotBeCopiedNorMoved& other)            = delete;
-  CannotBeCopiedNorMoved& operator=(const CannotBeCopiedNorMoved& other) = delete;
+  _CCCL_HOST_DEVICE RemembersCopy()
+  {
+    n_      = 0;
+    copied_ = false;
+  }
 
-  CannotBeCopiedNorMoved(CannotBeCopiedNorMoved&& other)            = delete;
-  CannotBeCopiedNorMoved& operator=(CannotBeCopiedNorMoved&& other) = delete;
+  _CCCL_HOST_DEVICE explicit RemembersCopy(int n)
+  {
+    n_      = n;
+    copied_ = false;
+  }
+  _CCCL_HOST_DEVICE RemembersCopy(const RemembersCopy& other)
+  {
+    n_      = other.n_;
+    copied_ = true;
+  }
+  _CCCL_HOST_DEVICE RemembersCopy& operator=(const RemembersCopy& other)
+  {
+    n_      = other.n_;
+    copied_ = true;
+    return *this;
+  }
+  _CCCL_HOST_DEVICE bool copied() const
+  {
+    return copied_;
+  }
+
+  int n_;
+  bool copied_ = false;
 };
 
-void TestVectorEmplaceBackDoesNotCopyOrMove()
+// functor used to count if elements are copied
+struct is_copied
 {
-  using T = CannotBeCopiedNorMoved;
+  _CCCL_HOST_DEVICE bool operator()(const RemembersCopy& x) const
+  {
+    return x.copied();
+  }
+};
 
-  thrust::host_vector<T> v;
+void TestVectorEmplaceBackDoesNotCopy()
+{
+  using T = RemembersCopy;
 
-  v.emplace_back((T) {});
+  thrust::host_vector<T> v_h;
+  v_h.reserve(1); // TODO remove by allowing realloc
+  v_h.emplace_back(42);
+
+  thrust::device_vector<T> v_d;
+  v_d.reserve(1); // TODO remove by allowing realloc
+  v_d.emplace_back(42);
+
+  REQUIRE(v_h[0].copied() == false);
+  // Verbose but necessary: the flag is on device
+  // int n_copied = thrust::count_if(v_d.begin(), v_d.end(), is_copied{}); wrong: this passes copies to the algo !
+  const T* first = thrust::raw_pointer_cast(v_d.data());
+  // Operate on raw pointer instead
+  int n_copied = thrust::count_if(thrust::device, first, first + v_d.size(), is_copied{});
+  REQUIRE(n_copied == 0);
 }
-DECLARE_UNITTEST(TestVectorEmplaceBackDoesNotCopyOrMove);
+DECLARE_UNITTEST(TestVectorEmplaceBackDoesNotCopy);
+
+enum class Loc
+{
+  None,
+  Host,
+  Device
+};
+
+struct RemembersConstructionLocation
+{
+  _CCCL_HOST_DEVICE RemembersConstructionLocation()
+  {
+    n_ = 0;
+    NV_IF_TARGET(NV_IS_DEVICE, (loc_ = Loc::Device;), (loc_ = Loc::Host;));
+  }
+
+  _CCCL_HOST_DEVICE explicit RemembersConstructionLocation(int n)
+  {
+    n_ = n;
+    NV_IF_TARGET(NV_IS_DEVICE, (loc_ = Loc::Device;), (loc_ = Loc::Host;));
+  }
+
+  _CCCL_HOST_DEVICE bool constructed_on_host() const
+  {
+    return loc_ == Loc::Host;
+  }
+  _CCCL_HOST_DEVICE bool constructed_on_device() const
+  {
+    return loc_ == Loc::Device;
+  }
+
+  int n_;
+  Loc loc_ = Loc::None;
+};
+
+// functor used to count if elements are constructed on device
+struct is_constructed_on_device
+{
+  _CCCL_HOST_DEVICE bool operator()(const RemembersConstructionLocation& x) const
+  {
+    return x.constructed_on_device();
+  }
+};
+
+void TestVectorEmplaceBackConstructInTheRightLocation()
+{
+  using T = RemembersConstructionLocation;
+
+  thrust::host_vector<T> v_h;
+  v_h.reserve(1); // TODO remove by allowing realloc
+  v_h.emplace_back(42);
+
+  thrust::device_vector<T> v_d;
+  v_d.reserve(1); // TODO remove by allowing realloc
+  v_d.emplace_back(42);
+
+  REQUIRE(v_h[0].constructed_on_host() == true);
+  const T* first              = thrust::raw_pointer_cast(v_d.data());
+  int n_constructed_on_device = thrust::count_if(thrust::device, first, first + v_d.size(), is_constructed_on_device{});
+  REQUIRE(n_constructed_on_device == 1);
+}

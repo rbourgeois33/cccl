@@ -591,7 +591,9 @@ template <typename T, typename Alloc>
 template <typename... Args>
 typename vector_base<T, Alloc>::reference vector_base<T, Alloc>::emplace_back(Args&&... args)
 {
-  insert(end(), value_type(::cuda::std::forward<Args>(args)...));
+  // TODO: support realloc.
+  m_storage.emplace_construct(end(), ::cuda::std::forward<Args>(args)...);
+  m_size += 1;
   return back();
 } // end vector_base::emplace_back()
 

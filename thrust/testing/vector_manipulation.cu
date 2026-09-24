@@ -83,6 +83,21 @@ void TestVectorManipulation(size_t n)
     }
   }
 
+  // emplace_back
+  Vector vec3;
+  vec.reserve(10); // TODO remove by allowing realloc
+  for (size_t i = 0; i < 10; ++i)
+  {
+    REQUIRE(vec3.size() == i);
+    vec3.emplace_back(T(i));
+    REQUIRE(vec3.size() == i + 1);
+    for (size_t j = 0; j <= i; j++)
+    {
+      REQUIRE(vec3[j] == T(j));
+    }
+    REQUIRE(vec3.back() == T(i));
+  }
+
   // TODO test swap, erase(pos), erase(begin, end)
 }
 
