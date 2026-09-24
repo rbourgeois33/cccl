@@ -591,10 +591,10 @@ template <typename T, typename Alloc>
 template <typename... Args>
 typename vector_base<T, Alloc>::reference vector_base<T, Alloc>::emplace_back(Args&&... args)
 {
-  // we've got room for all of them
   if (capacity() - size() >= 1)
   {
     m_storage.emplace_construct_one(end(), ::cuda::std::forward<Args>(args)...);
+    m_size += 1;
   }
   else
   {
@@ -642,7 +642,6 @@ typename vector_base<T, Alloc>::reference vector_base<T, Alloc>::emplace_back(Ar
     m_storage.swap(new_storage);
     m_size = old_size + 1;
   }
-  m_size += 1;
   return back();
 } // end vector_base::emplace_back()
 

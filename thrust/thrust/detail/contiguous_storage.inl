@@ -5,8 +5,6 @@
 
 #include <thrust/detail/config.h>
 
-#include "cuda/std/__utility/forward.h"
-
 #if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
 #  pragma GCC system_header
 #elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
@@ -23,6 +21,7 @@
 #include <thrust/detail/contiguous_storage.h>
 
 #include <cuda/std/__host_stdlib/stdexcept>
+#include <cuda/std/__utility/forward.h>
 #include <cuda/std/__utility/move.h>
 #include <cuda/std/__utility/swap.h>
 

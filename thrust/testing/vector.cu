@@ -1090,7 +1090,7 @@ void TestVectorEmplaceBackDoesNotCopy()
   // int n_copied = thrust::count_if(v_d.begin(), v_d.end(), is_copied{}); wrong: this passes copies to the algo !
   const T* first = thrust::raw_pointer_cast(v_d.data());
   // Operate on raw pointer instead
-  int n_copied = thrust::count_if(thrust::device, first, first + v_d.size(), is_copied{});
+  const int n_copied = thrust::count_if(thrust::device, first, first + v_d.size(), is_copied{});
   REQUIRE(n_copied == 0);
 }
 DECLARE_UNITTEST(TestVectorEmplaceBackDoesNotCopy);
@@ -1149,8 +1149,9 @@ void TestVectorEmplaceBackConstructsInTheRightLocation()
   v_d.emplace_back(42);
 
   REQUIRE(v_h[0].constructed_on_host() == true);
-  const T* first              = thrust::raw_pointer_cast(v_d.data());
-  int n_constructed_on_device = thrust::count_if(thrust::device, first, first + v_d.size(), is_constructed_on_device{});
+  const T* first = thrust::raw_pointer_cast(v_d.data());
+  const int n_constructed_on_device =
+    thrust::count_if(thrust::device, first, first + v_d.size(), is_constructed_on_device{});
   REQUIRE(n_constructed_on_device == 1);
 }
 DECLARE_UNITTEST(TestVectorEmplaceBackConstructsInTheRightLocation);
