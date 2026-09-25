@@ -88,8 +88,7 @@ void TestVectorManipulation(size_t n)
   for (size_t i = 0; i < 10; ++i)
   {
     REQUIRE(vec3.size() == i);
-    auto ref = vec3.emplace_back(T(i));
-    REQUIRE(T(i) == ref); // Emplace_back returns just-emplaced element
+    REQUIRE(vec3.emplace_back(T(i)==T(i));
     REQUIRE(vec3.size() == i + 1);
     for (size_t j = 0; j <= i; j++)
     {

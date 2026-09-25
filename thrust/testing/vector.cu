@@ -1144,15 +1144,18 @@ void TestVectorEmplaceBackConstructsInTheRightLocation()
 
   thrust::host_vector<T> v_h;
   v_h.emplace_back(42);
+  REQUIRE(v_h[0].constructed_on_host() == true);
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 
   thrust::device_vector<T> v_d;
   v_d.emplace_back(42);
 
-  REQUIRE(v_h[0].constructed_on_host() == true);
   const T* first = thrust::raw_pointer_cast(v_d.data());
   const int n_constructed_on_device =
     thrust::count_if(thrust::device, first, first + v_d.size(), is_constructed_on_device{});
   REQUIRE(n_constructed_on_device == 1);
+
+#endif // THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 }
 DECLARE_UNITTEST(TestVectorEmplaceBackConstructsInTheRightLocation);
 

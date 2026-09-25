@@ -27,12 +27,11 @@ struct emplace_via_allocator
   ::cuda::std::tuple<Args...> args_as_a_tuple;
 
   template <typename T>
-  _CCCL_HOST_DEVICE void operator()(T& p)
+  _CCCL_HOST_DEVICE void operator()(T& loc)
   {
-    // apply allows to have any numer of args as input to function
     ::cuda::std::apply(
       [&](auto&... xs) {
-        new (static_cast<void*>(&p)) T(xs...);
+        new (static_cast<void*>(&loc)) T(xs...);
       },
       args_as_a_tuple);
   }
@@ -40,10 +39,10 @@ struct emplace_via_allocator
 
 // Build one object at p from args, on the system (CPU or GPU) the allocator belongs to
 template <typename Allocator, typename Pointer, typename... Args>
-_CCCL_HOST_DEVICE void emplace_construct(Allocator& a, Pointer ptr, Args... args)
+_CCCL_HOST_DEVICE void emplace_construct(Allocator& a, Pointer loc, Args... args)
 {
   // Dispatch according to backend (loop/kernel)
-  thrust::for_each_n(allocator_system<Allocator>::get(a), ptr, 1, emplace_via_allocator<Args...>{{args...}});
+  thrust::for_each_n(allocator_system<Allocator>::get(a), loc, 1, emplace_via_allocator<Args...>{{args...}});
 }
 } // namespace detail
 THRUST_NAMESPACE_END
