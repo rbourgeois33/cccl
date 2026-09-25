@@ -6,6 +6,7 @@
 _CCCL_DIAG_SUPPRESS_GCC("-Wstringop-overflow")
 _CCCL_DIAG_SUPPRESS_GCC("-Warray-bounds")
 
+#include <thrust/count.h>
 #include <thrust/device_malloc_allocator.h>
 #include <thrust/sequence.h>
 
@@ -1031,3 +1032,157 @@ void TestVectorNoInitResize()
   // thrust::device_vector<IntWithInit>(5).resize(10, thrust::no_init);
 }
 DECLARE_UNITTEST(TestVectorNoInitResize);
+
+struct RemembersCopy
+{
+  _CCCL_HOST_DEVICE RemembersCopy()
+  {
+    n_      = 0;
+    copied_ = false;
+  }
+
+  _CCCL_HOST_DEVICE explicit RemembersCopy(int n)
+  {
+    n_      = n;
+    copied_ = false;
+  }
+  _CCCL_HOST_DEVICE RemembersCopy(const RemembersCopy& other)
+  {
+    n_      = other.n_;
+    copied_ = true;
+  }
+  _CCCL_HOST_DEVICE RemembersCopy& operator=(const RemembersCopy& other)
+  {
+    n_      = other.n_;
+    copied_ = true;
+    return *this;
+  }
+  _CCCL_HOST_DEVICE bool copied() const
+  {
+    return copied_;
+  }
+
+  int n_;
+  bool copied_ = false;
+};
+
+// functor used to count if elements are copied
+struct is_copied
+{
+  _CCCL_HOST_DEVICE bool operator()(const RemembersCopy& x) const
+  {
+    return x.copied();
+  }
+};
+
+void TestVectorEmplaceBackDoesNotCopy()
+{
+  using T = RemembersCopy;
+
+  thrust::host_vector<T> v_h;
+  v_h.emplace_back(42);
+
+  thrust::device_vector<T> v_d;
+  v_d.emplace_back(42);
+
+  REQUIRE(v_h[0].copied() == false);
+  // Verbose but necessary: the flag is on device
+  // int n_copied = thrust::count_if(v_d.begin(), v_d.end(), is_copied{}); wrong: this passes copies to the algo !
+  const T* first = thrust::raw_pointer_cast(v_d.data());
+  // Operate on raw pointer instead
+  const int n_copied = thrust::count_if(thrust::device, first, first + v_d.size(), is_copied{});
+  REQUIRE(n_copied == 0);
+}
+DECLARE_UNITTEST(TestVectorEmplaceBackDoesNotCopy);
+
+enum class Loc
+{
+  None,
+  Host,
+  Device
+};
+
+struct RemembersConstructionLocation
+{
+  _CCCL_HOST_DEVICE RemembersConstructionLocation()
+  {
+    n_ = 0;
+    NV_IF_TARGET(NV_IS_DEVICE, (loc_ = Loc::Device;), (loc_ = Loc::Host;));
+  }
+
+  _CCCL_HOST_DEVICE explicit RemembersConstructionLocation(int n)
+  {
+    n_ = n;
+    NV_IF_TARGET(NV_IS_DEVICE, (loc_ = Loc::Device;), (loc_ = Loc::Host;));
+  }
+
+  _CCCL_HOST_DEVICE bool constructed_on_host() const
+  {
+    return loc_ == Loc::Host;
+  }
+  _CCCL_HOST_DEVICE bool constructed_on_device() const
+  {
+    return loc_ == Loc::Device;
+  }
+
+  int n_;
+  Loc loc_ = Loc::None;
+};
+
+// functor used to count if elements are constructed on device
+struct is_constructed_on_device
+{
+  _CCCL_HOST_DEVICE bool operator()(const RemembersConstructionLocation& x) const
+  {
+    return x.constructed_on_device();
+  }
+};
+
+void TestVectorEmplaceBackConstructsInTheRightLocation()
+{
+  using T = RemembersConstructionLocation;
+
+  thrust::host_vector<T> v_h;
+  v_h.emplace_back(42);
+  REQUIRE(v_h[0].constructed_on_host() == true);
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+
+  thrust::device_vector<T> v_d;
+  v_d.emplace_back(42);
+
+  const T* first = thrust::raw_pointer_cast(v_d.data());
+  const int n_constructed_on_device =
+    thrust::count_if(thrust::device, first, first + v_d.size(), is_constructed_on_device{});
+  REQUIRE(n_constructed_on_device == 1);
+
+#endif // THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+}
+DECLARE_UNITTEST(TestVectorEmplaceBackConstructsInTheRightLocation);
+
+struct ThrowsIfBuiltWithInteger
+{
+  _CCCL_HOST_DEVICE ThrowsIfBuiltWithInteger()
+  {
+    n_ = 0;
+  }
+
+  _CCCL_HOST_DEVICE explicit ThrowsIfBuiltWithInteger(int n)
+  {
+    n_ = n;
+    NV_IF_TARGET(NV_IS_HOST, (throw std::runtime_error("can't be built like this!");));
+  }
+
+  int n_;
+};
+
+void TestVectorEmplaceBackThrowsIfCtorThrows()
+{
+  using T = ThrowsIfBuiltWithInteger;
+
+  thrust::host_vector<T> v_h;
+  v_h.emplace_back();
+  v_h.emplace_back();
+  REQUIRE_THROWS_AS(v_h.emplace_back(42), std::runtime_error);
+}
+
+DECLARE_UNITTEST(TestVectorEmplaceBackThrowsIfCtorThrows);
