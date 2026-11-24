@@ -673,18 +673,20 @@ CUB_TEST("Device reduce uses environment", "[reduce][device]", CUB_SMALL, requir
           /* stream */ nullptr,
           transform_t{}));
 
-      return cuda::std::array<void*, 1>{reinterpret_cast<void*>(
-        cub::detail::reduce::DeviceReduceKernel<
-          policy_t,
-          /* StableReductionOrder */ false,
-          input_it_t,
-          decltype(raw_ptr),
-          offset_t,
-          offset_t,
-          op_t,
-          accumulator_t,
-          init_value_t,
-          transform_t>)};
+      return cuda::std::array<void*, 2>{
+        reinterpret_cast<void*>(cub::detail::reduce::DeviceReduceInitKernel<decltype(raw_ptr), accumulator_t>),
+        reinterpret_cast<void*>(
+          cub::detail::reduce::DeviceReduceKernel<
+            policy_t,
+            /* StableReductionOrder */ false,
+            input_it_t,
+            decltype(raw_ptr),
+            offset_t,
+            offset_t,
+            op_t,
+            accumulator_t,
+            init_value_t,
+            transform_t>)};
     }
     else
     {
@@ -842,18 +844,20 @@ CUB_TEST("Device sum uses environment", "[reduce][device]", CUB_SMALL, requireme
           /* stream */ nullptr,
           transform_t{}));
 
-      return cuda::std::array<void*, 1>{reinterpret_cast<void*>(
-        cub::detail::reduce::DeviceReduceKernel<
-          policy_t,
-          /* StableReductionOrder */ false,
-          input_it_t,
-          decltype(raw_ptr),
-          offset_t,
-          offset_t,
-          op_t,
-          accumulator_t,
-          init_value_t,
-          transform_t>)};
+      return cuda::std::array<void*, 2>{
+        reinterpret_cast<void*>(cub::detail::reduce::DeviceReduceInitKernel<decltype(raw_ptr), accumulator_t>),
+        reinterpret_cast<void*>(
+          cub::detail::reduce::DeviceReduceKernel<
+            policy_t,
+            /* StableReductionOrder */ false,
+            input_it_t,
+            decltype(raw_ptr),
+            offset_t,
+            offset_t,
+            op_t,
+            accumulator_t,
+            init_value_t,
+            transform_t>)};
     }
     else
     {

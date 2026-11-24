@@ -110,6 +110,7 @@ CUB_RUNTIME_FUNCTION _CCCL_VISIBILITY_HIDDEN _CCCL_FORCEINLINE cudaError_t invok
   cudaStream_t stream,
   TransformOpT transform_op,
   ReducePolicy active_policy,
+  ::cuda::compute_capability cc,
   KernelLauncherFactory launcher_factory)
 {
   // Return if the caller is simply requesting the size of the storage allocation
@@ -125,7 +126,11 @@ CUB_RUNTIME_FUNCTION _CCCL_VISIBILITY_HIDDEN _CCCL_FORCEINLINE cudaError_t invok
 
   // Invoke single_reduce_sweep_kernel
   if (const auto error = CubDebug(
-        launcher_factory(1, active_policy.single_tile.threads_per_block, 0, stream)
+        launcher_factory(1,
+                         active_policy.single_tile.threads_per_block,
+                         0,
+                         stream,
+                         /* dependent_launch */ cc >= ::cuda::compute_capability{9, 0})
           .doit(detail::reduce::DeterministicDeviceReduceSingleTileKernel<
                   PolicySelector,
                   InputIteratorT,
@@ -174,6 +179,7 @@ CUB_RUNTIME_FUNCTION _CCCL_VISIBILITY_HIDDEN _CCCL_FORCEINLINE cudaError_t invok
   cudaStream_t stream,
   TransformOpT transform_op,
   ReducePolicy active_policy,
+  ::cuda::compute_capability cc,
   KernelLauncherFactory launcher_factory)
 {
   // Immediate chunk sizes are passed to the kernels as-is; deferred problem sizes are read on device.
@@ -284,7 +290,11 @@ CUB_RUNTIME_FUNCTION _CCCL_VISIBILITY_HIDDEN _CCCL_FORCEINLINE cudaError_t invok
       reduce_config.sm_occupancy);
 
     if (const auto error = CubDebug(
-          launcher_factory(current_grid_size, active_policy.multi_tile.threads_per_block, 0, stream)
+          launcher_factory(current_grid_size,
+                           active_policy.multi_tile.threads_per_block,
+                           0,
+                           stream,
+                           /* dependent_launch */ cc >= ::cuda::compute_capability{9, 0})
             .doit(detail::reduce::DeterministicDeviceReduceKernel<PolicySelector,
                                                                   InputIteratorT,
                                                                   num_items_kernel_t,
@@ -328,7 +338,11 @@ CUB_RUNTIME_FUNCTION _CCCL_VISIBILITY_HIDDEN _CCCL_FORCEINLINE cudaError_t invok
   const auto second_pass_error = [&] {
     if constexpr (::cuda::args::__traits<OffsetT>::is_deferred)
     {
-      return launcher_factory(1, active_policy.single_tile.threads_per_block, 0, stream)
+      return launcher_factory(1,
+                              active_policy.single_tile.threads_per_block,
+                              0,
+                              stream,
+                              /* dependent_launch */ cc >= ::cuda::compute_capability{9, 0})
         .doit(detail::reduce::DeterministicDeviceReduceDeferredSingleTileKernel<
                 PolicySelector,
                 DeterministicAccumT*,
@@ -347,7 +361,11 @@ CUB_RUNTIME_FUNCTION _CCCL_VISIBILITY_HIDDEN _CCCL_FORCEINLINE cudaError_t invok
     }
     else
     {
-      return launcher_factory(1, active_policy.single_tile.threads_per_block, 0, stream)
+      return launcher_factory(1,
+                              active_policy.single_tile.threads_per_block,
+                              0,
+                              stream,
+                              /* dependent_launch */ cc >= ::cuda::compute_capability{9, 0})
         .doit(detail::reduce::DeterministicDeviceReduceSingleTileKernel<
                 PolicySelector,
                 DeterministicAccumT*,
@@ -445,6 +463,7 @@ CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t dispatch(
         stream,
         transform_op,
         active_policy,
+        cc,
         launcher_factory);
     }
   }
@@ -468,6 +487,7 @@ CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t dispatch(
     stream,
     transform_op,
     active_policy,
+    cc,
     launcher_factory);
 }
 } // namespace detail::rfa

@@ -1003,6 +1003,75 @@ C2H_TEST("Reduce serialize/deserialize round-trip (cubin)", "[reduce][serializat
   cccl_serialization_buffer_free(blob);
 }
 
+C2H_TEST("Reduce not_guaranteed serialize/deserialize round-trip", "[reduce][serialization][nondeterministic]")
+{
+  using T = int32_t;
+
+  constexpr int device_id = 0;
+  const auto& build_info  = BuildInformation<device_id>::init();
+
+  const cccl_op_t op = make_well_known_binary_operation(); // plus
+  pointer_t<T> dummy_in(1);
+  pointer_t<T> dummy_out(1);
+  value_t<T> init{T{3}};
+
+  BuildResultT build_a{};
+  REQUIRE(
+    CUDA_SUCCESS
+    == cccl_device_reduce_compile(
+      &build_a,
+      dummy_in,
+      dummy_out,
+      op,
+      get_type_info<T>(),
+      CCCL_VALUE_INIT,
+      CCCL_NOT_GUARANTEED,
+      build_info.get_cc_major(),
+      build_info.get_cc_minor(),
+      build_info.get_cub_path(),
+      build_info.get_thrust_path(),
+      build_info.get_libcudacxx_path(),
+      build_info.get_ctk_path(),
+      nullptr));
+  // The non-deterministic path zero-initializes the output with a dedicated kernel
+  REQUIRE(build_a.init_kernel_lowered_name != nullptr);
+  CHECK(build_a.init_kernel_lowered_name[0] != '\0');
+
+  void* blob       = nullptr;
+  size_t blob_size = 0;
+  REQUIRE(CUDA_SUCCESS == cccl_device_reduce_serialize(&build_a, &blob, &blob_size));
+  REQUIRE(CUDA_SUCCESS == cccl_device_reduce_cleanup(&build_a));
+
+  BuildResultT build_b{};
+  REQUIRE(CUDA_SUCCESS == cccl_device_reduce_deserialize(&build_b, blob, blob_size));
+  REQUIRE(build_b.determinism == CCCL_NOT_GUARANTEED);
+  REQUIRE(build_b.init_kernel_lowered_name != nullptr);
+  REQUIRE(CUDA_SUCCESS == cccl_device_reduce_load(&build_b));
+  CHECK(build_b.init_kernel != nullptr);
+
+  const std::size_t n = GENERATE(16, 1 << 20);
+  const std::vector<T> input(n, T{1});
+  pointer_t<T> input_ptr(input);
+  pointer_t<T> output_ptr(std::vector<T>{42}); // the output does not need to be initialized by the caller
+  CUstream null_stream      = nullptr;
+  size_t temp_storage_bytes = 0;
+
+  REQUIRE(CUDA_SUCCESS
+          == cccl_device_reduce_nondeterministic(
+            build_b, nullptr, &temp_storage_bytes, input_ptr, output_ptr, n, op, init, null_stream));
+  const pointer_t<uint8_t> temp_storage(temp_storage_bytes);
+  REQUIRE(CUDA_SUCCESS
+          == cccl_device_reduce_nondeterministic(
+            build_b, temp_storage.ptr, &temp_storage_bytes, input_ptr, output_ptr, n, op, init, null_stream));
+
+  const T result   = output_ptr[0];
+  const T expected = std::accumulate(input.begin(), input.end(), init.value);
+  REQUIRE(result == expected);
+
+  REQUIRE(CUDA_SUCCESS == cccl_device_reduce_cleanup(&build_b));
+  cccl_serialization_buffer_free(blob);
+}
+
 C2H_TEST("Reduce serialize/deserialize round-trip (ltoir + link_ltoir)", "[reduce][serialization]")
 {
   using T = int32_t;

@@ -121,14 +121,12 @@ struct DeviceReduceKernelSource
       InitValueT,
       AccumT>)
 
+  // Zero-initializes the output of the atomic code path
+  CUB_DEFINE_KERNEL_GETTER(InitKernel, DeviceReduceInitKernel<OutputIteratorT, AccumT>)
+
   CUB_RUNTIME_FUNCTION static constexpr size_t AccumSize()
   {
     return sizeof(AccumT);
-  }
-
-  CUB_RUNTIME_FUNCTION static constexpr size_t InitSize()
-  {
-    return sizeof(InitValueT);
   }
 };
 
@@ -630,16 +628,6 @@ _CCCL_SUPPRESS_DEPRECATED_POP
 
 namespace detail::reduce
 {
-// Retrieves a device pointer from a pointer-to-pointer.
-//
-// For CCCL.C's indirect_arg_t: ptr holds the address of the device pointer (&it.state).
-// For regular C++ pointers: the caller passes &device_ptr directly.
-// In both cases, dereferencing yields the actual device pointer.
-CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE void* get_device_ptr(void* ptr)
-{
-  return *reinterpret_cast<void**>(ptr);
-}
-
 template <bool StableReductionOrder,
           typename AccumT,
           typename InputIteratorT,
@@ -661,6 +649,7 @@ CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t invoke_regular_size_reduce(
   cudaStream_t stream,
   TransformOpT transform_op,
   ReducePolicy active_policy,
+  ::cuda::compute_capability cc,
   KernelSource kernel_source,
   KernelLauncherFactory launcher_factory)
 {
@@ -690,8 +679,24 @@ CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t invoke_regular_size_reduce(
   [[maybe_unused]] AccumT* d_block_reductions = nullptr; // buffer for per-block aggregates for the two-phase code path
   if constexpr (!StableReductionOrder)
   {
-    if (const auto error = CubDebug(launcher_factory.MemsetAsync(
-          _CUB::detail::reduce::get_device_ptr(&d_out), 0, kernel_source.InitSize(), stream)))
+    // Zero-initialize the output that DeviceReduceKernel accumulates into
+    _CUB_LOG_KERNEL_LAUNCH("DeviceReduceInitKernel", 1, 1, 1, 1, 0, stream, "");
+
+    if (const auto error = CubDebug(
+          launcher_factory(1, 1, 0, stream, /* dependent_launch */ cc >= ::cuda::compute_capability{9, 0})
+            .doit(kernel_source.InitKernel(), d_out)))
+    {
+      return error;
+    }
+
+    // Check for failure to launch
+    if (const auto error = CubDebug(cudaPeekAtLastError()))
+    {
+      return error;
+    }
+
+    // Sync the stream if specified to flush runtime errors
+    if (const auto error = CubDebug(_CUB::detail::DebugSyncStream(stream)))
     {
       return error;
     }
@@ -770,7 +775,11 @@ CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t invoke_regular_size_reduce(
     }
   }();
   if (const auto error = CubDebug(
-        launcher_factory(reduce_grid_size, active_policy.multi_tile.threads_per_block, 0, stream)
+        launcher_factory(reduce_grid_size,
+                         active_policy.multi_tile.threads_per_block,
+                         0,
+                         stream,
+                         /* dependent_launch */ cc >= ::cuda::compute_capability{9, 0})
           .doit(kernel_source.ReductionKernel(),
                 d_in,
                 reduce_kernel_output,
@@ -805,7 +814,11 @@ CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t invoke_regular_size_reduce(
     if constexpr (::cuda::args::__traits<OffsetT>::is_deferred)
     {
       if (const auto error = CubDebug(
-            launcher_factory(1, active_policy.single_tile.threads_per_block, 0, stream)
+            launcher_factory(1,
+                             active_policy.single_tile.threads_per_block,
+                             0,
+                             stream,
+                             /* dependent_launch */ cc >= ::cuda::compute_capability{9, 0})
               .doit(kernel_source.DeferredSingleTileSecondKernel(),
                     d_block_reductions,
                     d_out,
@@ -821,7 +834,11 @@ CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t invoke_regular_size_reduce(
     else
     {
       if (const auto error = CubDebug(
-            launcher_factory(1, active_policy.single_tile.threads_per_block, 0, stream)
+            launcher_factory(1,
+                             active_policy.single_tile.threads_per_block,
+                             0,
+                             stream,
+                             /* dependent_launch */ cc >= ::cuda::compute_capability{9, 0})
               .doit(kernel_source.SingleTileSecondKernel(),
                     d_block_reductions,
                     d_out,
@@ -976,7 +993,11 @@ CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE auto dispatch(
 
         // Invoke single_reduce_sweep_kernel
         if (const auto error = CubDebug(
-              launcher_factory(1, active_policy.single_tile.threads_per_block, 0, stream)
+              launcher_factory(1,
+                               active_policy.single_tile.threads_per_block,
+                               0,
+                               stream,
+                               /* dependent_launch */ cc >= ::cuda::compute_capability{9, 0})
                 .doit(
                   kernel_source.SingleTileKernel(), d_in, d_out, offset_num_items, reduction_op, init, transform_op)))
         {
@@ -1020,6 +1041,7 @@ CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE auto dispatch(
       stream,
       transform_op,
       active_policy,
+      cc,
       kernel_source,
       launcher_factory);
   });

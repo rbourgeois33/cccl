@@ -41,6 +41,9 @@ typedef struct cccl_device_reduce_build_result_t
   char* single_tile_kernel_lowered_name;
   char* single_tile_second_kernel_lowered_name;
   char* reduction_kernel_lowered_name;
+  // Only set for CCCL_NOT_GUARANTEED builds, which zero-initialize the output with this kernel
+  CUkernel init_kernel;
+  char* init_kernel_lowered_name;
 } cccl_device_reduce_build_result_t;
 
 // `init` describes the accumulator type and must be a valid type even with

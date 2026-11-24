@@ -107,6 +107,20 @@ finalize_and_store_aggregate(OutputIteratorT d_out, ReductionOpT, no_init_t, Acc
   *d_out = block_aggregate;
 }
 
+//! @brief Zero-initializes the output of the atomic (non-deterministic) reduction, which every block then accumulates
+//!        into. Replaces a `cudaMemsetAsync` so that the whole dispatch can use programmatic dependent launch.
+//!
+//! @param[out] d_out Pointer to the output aggregate
+template <typename OutputIteratorT, typename AccumT>
+_CCCL_KERNEL_ATTRIBUTES __launch_bounds__(1) void DeviceReduceInitKernel(OutputIteratorT d_out)
+{
+  // We immediately trigger launching the reduction kernel, before waiting for a previous kernel
+  _CCCL_PDL_TRIGGER_NEXT_LAUNCH();
+  // Wait for the preceding kernel in the stream, which may still read or write the output
+  _CCCL_PDL_GRID_DEPENDENCY_SYNC();
+  *d_out = AccumT{};
+}
+
 /**
  * @brief Reduce region kernel entry point (multi-block). Computes privatized
  *        reductions, one per thread block.
@@ -172,6 +186,9 @@ __launch_bounds__(int(_CUB::detail::current_policy<PolicySelector>().multi_tile.
   [[maybe_unused]] const InitValueT init,
   TransformOpT transform_op)
 {
+  // Wait for the preceding kernel in the stream to finish writing the input (and a deferred problem size)
+  _CCCL_PDL_GRID_DEPENDENCY_SYNC();
+
   static constexpr ReducePassPolicy policy = _CUB::detail::current_policy<PolicySelector>().multi_tile;
   const OffsetT num_items                  = _CUB::detail::parameter_from_device<OffsetT>(kernel_num_items);
 
@@ -323,6 +340,9 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(
                                        const InitValueT init,
                                        TransformOpT transform_op)
 {
+  // Wait for the preceding kernel in the stream (e.g. the first pass) to finish writing the input
+  _CCCL_PDL_GRID_DEPENDENCY_SYNC();
+
   static constexpr ReducePassPolicy policy = _CUB::detail::current_policy<PolicySelector>().single_tile;
   // TODO(bgruber): pass policy directly as template argument to AgentReduce in C++20
   using agent_policy_t = detail::agent_reduce_policy<
@@ -393,6 +413,9 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(
                                                const InitValueT init,
                                                TransformOpT transform_op)
 {
+  // Wait for the first pass to finish writing the block aggregates
+  _CCCL_PDL_GRID_DEPENDENCY_SYNC();
+
   const OffsetT actual_num_items                      = _CUB::detail::parameter_from_device<OffsetT>(kernel_num_items);
   static constexpr ReducePassPolicy first_pass_policy = _CUB::detail::current_policy<PolicySelector>().multi_tile;
   constexpr int first_pass_tile_size = first_pass_policy.threads_per_block * first_pass_policy.items_per_thread;
