@@ -120,6 +120,9 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(int(
                                                                          TransformOpT transform_op,
                                                                          const int reduce_grid_size)
 {
+  // Wait for the preceding kernel in the stream to finish writing the input (and a deferred problem size)
+  _CCCL_PDL_GRID_DEPENDENCY_SYNC();
+
   constexpr ReducePassPolicy policy = _CUB::detail::current_policy<PolicySelector>().multi_tile;
   constexpr int items_per_thread    = policy.items_per_thread;
   constexpr int threads_per_block   = policy.threads_per_block;
@@ -348,6 +351,9 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(
                                                     InitValueT init,
                                                     TransformOpT transform_op)
 {
+  // Wait for the preceding kernel in the stream (e.g. the first pass) to finish writing the input
+  _CCCL_PDL_GRID_DEPENDENCY_SYNC();
+
   constexpr ReducePassPolicy policy = _CUB::detail::current_policy<PolicySelector>().single_tile;
   constexpr int threads_per_block   = policy.threads_per_block;
 
@@ -422,6 +428,9 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(
                                                             const InitValueT init,
                                                             TransformOpT transform_op)
 {
+  // Wait for the first pass to finish writing the block aggregates (and a deferred problem size)
+  _CCCL_PDL_GRID_DEPENDENCY_SYNC();
+
   using actual_num_items_t                  = deterministic_num_items_t<KernelNumItemsT>;
   const actual_num_items_t actual_num_items = _CUB::detail::parameter_from_device<actual_num_items_t>(kernel_num_items);
   const int num_items =

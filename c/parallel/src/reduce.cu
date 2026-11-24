@@ -139,6 +139,11 @@ std::string get_device_reduce_kernel_name(
     transform_op_t);
 }
 
+std::string get_init_kernel_name(std::string_view output_iterator_t, std::string_view accum_t)
+{
+  return std::format("cub::detail::reduce::DeviceReduceInitKernel<{0}, {1}>", output_iterator_t, accum_t);
+}
+
 struct reduce_kernel_source
 {
   cccl_device_reduce_build_result_t& build;
@@ -159,9 +164,9 @@ struct reduce_kernel_source
   {
     return build.reduction_kernel;
   }
-  size_t InitSize() const
+  CUkernel InitKernel() const
   {
-    return build.accumulator_size;
+    return build.init_kernel;
   }
 };
 } // namespace reduce
@@ -294,9 +299,13 @@ static_assert(device_reduce_policy()(detail::current_tuning_cc()) == {10},
     cccl_type_enum_to_name(accum_t.type, true), output_iterator_name, op_name, init_t, accum_cpp, true);
   std::string reduction_kernel_name = reduce::get_device_reduce_kernel_name(
     op_name, input_iterator_name, output_iterator_name, accum_cpp, init_t, determinism != CCCL_NOT_GUARANTEED);
+  // Only the non-deterministic (atomic) path zero-initializes the output with a kernel
+  const bool has_init_kernel         = determinism == CCCL_NOT_GUARANTEED;
+  const std::string init_kernel_name = reduce::get_init_kernel_name(output_iterator_name, accum_cpp);
   std::string single_tile_kernel_lowered_name;
   std::string single_tile_second_kernel_lowered_name;
   std::string reduction_kernel_lowered_name;
+  std::string init_kernel_lowered_name;
 
   const std::string arch = std::format("-arch=sm_{0}{1}", cc_major, cc_minor);
 
@@ -335,10 +344,12 @@ static_assert(device_reduce_policy()(detail::current_tuning_cc()) == {10},
       ->add_expression({single_tile_kernel_name})
       ->add_expression({single_tile_second_kernel_name})
       ->add_expression({reduction_kernel_name})
+      ->add_expression_if(has_init_kernel, {init_kernel_name})
       ->compile_program({args.data(), args.size()})
       ->get_name({single_tile_kernel_name, single_tile_kernel_lowered_name})
       ->get_name({single_tile_second_kernel_name, single_tile_second_kernel_lowered_name})
-      ->get_name({reduction_kernel_name, reduction_kernel_lowered_name});
+      ->get_name({reduction_kernel_name, reduction_kernel_lowered_name})
+      ->get_name_if(has_init_kernel, {init_kernel_name, init_kernel_lowered_name});
 
   static_assert(::cuda::is_trivially_copyable_v<cub::detail::reduce::policy_selector>);
   auto policy_ptr = std::make_unique<cub::detail::reduce::policy_selector>(policy_sel);
@@ -346,6 +357,8 @@ static_assert(device_reduce_policy()(detail::current_tuning_cc()) == {10},
   auto single_tile_name        = std::unique_ptr<char[]>(duplicate_c_string(single_tile_kernel_lowered_name));
   auto single_tile_second_name = std::unique_ptr<char[]>(duplicate_c_string(single_tile_second_kernel_lowered_name));
   auto reduction_name          = std::unique_ptr<char[]>(duplicate_c_string(reduction_kernel_lowered_name));
+  auto init_name =
+    has_init_kernel ? std::unique_ptr<char[]>(duplicate_c_string(init_kernel_lowered_name)) : std::unique_ptr<char[]>{};
 
   build->cc               = cc_major * 10 + cc_minor;
   build->accumulator_size = accum_t.size;
@@ -356,6 +369,7 @@ static_assert(device_reduce_policy()(detail::current_tuning_cc()) == {10},
   build->single_tile_kernel        = nullptr;
   build->single_tile_second_kernel = nullptr;
   build->reduction_kernel          = nullptr;
+  build->init_kernel               = nullptr;
 
   // All potentially-throwing operations come before any release() calls so that
   // unique_ptrs automatically clean up on exception.
@@ -379,6 +393,7 @@ static_assert(device_reduce_policy()(detail::current_tuning_cc()) == {10},
   build->single_tile_kernel_lowered_name        = single_tile_name.release();
   build->single_tile_second_kernel_lowered_name = single_tile_second_name.release();
   build->reduction_kernel_lowered_name          = reduction_name.release();
+  build->init_kernel_lowered_name               = init_name.release();
 
   return CUDA_SUCCESS;
 }
@@ -399,7 +414,9 @@ try
       || build->payload_kind != CCCL_PAYLOAD_CUBIN || build->single_tile_kernel_lowered_name == nullptr
       || build->single_tile_kernel_lowered_name[0] == '\0' || build->single_tile_second_kernel_lowered_name == nullptr
       || build->single_tile_second_kernel_lowered_name[0] == '\0' || build->reduction_kernel_lowered_name == nullptr
-      || build->reduction_kernel_lowered_name[0] == '\0')
+      || build->reduction_kernel_lowered_name[0] == '\0'
+      || (build->determinism == CCCL_NOT_GUARANTEED
+          && (build->init_kernel_lowered_name == nullptr || build->init_kernel_lowered_name[0] == '\0')))
   {
     return CUDA_ERROR_INVALID_VALUE;
   }
@@ -414,6 +431,10 @@ try
     check(cuLibraryGetKernel(
       &build->single_tile_second_kernel, build->library, build->single_tile_second_kernel_lowered_name));
     check(cuLibraryGetKernel(&build->reduction_kernel, build->library, build->reduction_kernel_lowered_name));
+    if (build->determinism == CCCL_NOT_GUARANTEED)
+    {
+      check(cuLibraryGetKernel(&build->init_kernel, build->library, build->init_kernel_lowered_name));
+    }
   }
   catch (...)
   {
@@ -617,7 +638,8 @@ try
 
   for (char* p : {build_ptr->single_tile_kernel_lowered_name,
                   build_ptr->single_tile_second_kernel_lowered_name,
-                  build_ptr->reduction_kernel_lowered_name})
+                  build_ptr->reduction_kernel_lowered_name,
+                  build_ptr->init_kernel_lowered_name})
   {
     delete[] p;
   }
@@ -742,6 +764,7 @@ try
   w.write_cstring(build_ptr->single_tile_kernel_lowered_name);
   w.write_cstring(build_ptr->single_tile_second_kernel_lowered_name);
   w.write_cstring(build_ptr->reduction_kernel_lowered_name);
+  w.write_cstring(build_ptr->init_kernel_lowered_name); // written as empty when there is no init kernel
   w.release(out_buf, out_size);
   return CUDA_SUCCESS;
 }
@@ -802,6 +825,7 @@ try
   std::unique_ptr<char[]> n_single_tile{r.read_cstring_dup()};
   std::unique_ptr<char[]> n_single_tile_second{r.read_cstring_dup()};
   std::unique_ptr<char[]> n_reduction{r.read_cstring_dup()};
+  std::unique_ptr<char[]> n_init{r.read_cstring_dup()};
 
   cccl_device_reduce_build_result_t result{};
   result.cc                                     = static_cast<int>(h.cc);
@@ -816,6 +840,7 @@ try
   result.single_tile_kernel_lowered_name        = n_single_tile.release();
   result.single_tile_second_kernel_lowered_name = n_single_tile_second.release();
   result.reduction_kernel_lowered_name          = n_reduction.release();
+  result.init_kernel_lowered_name               = n_init.release();
   *build_ptr                                    = result;
   return CUDA_SUCCESS;
 }
